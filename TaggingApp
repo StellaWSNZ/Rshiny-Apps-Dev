@@ -1,3 +1,8 @@
+user_roles <- list(
+  individual = Sys.getenv("USERNAME"),
+  team = "Data Team"
+)
+
 required_packages <- c("shiny",
                        "shinydashboard",
                        "DT",
@@ -6,6 +11,8 @@ required_packages <- c("shiny",
                        "lubridate",
                        "shinyBS",
                        "shinyjs")
+
+
 
 new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
 if (length(new_packages))
@@ -67,7 +74,7 @@ ui <- dashboardPage(
                                
                                menuItem("Glossary", tabName = "glossary_tab", icon = icon("book")),
                                
-                               if (Sys.getenv("USERNAME") %in% c("Chris", "Stella")) {
+                               if (user_roles$individual %in% c("Chris", "Stella")) {
                                  menuItem("All Tags", tabName = "special_tab", icon = icon("star"))
                                }
   )),
@@ -143,7 +150,7 @@ ui <- dashboardPage(
       tab_list <- list(tabItem(tabName = "weekly_summary", fluidRow(
         column(
           2,
-          h2(paste0("Welcome ", Sys.getenv("USERNAME"), "!")),
+          h2(paste0("Welcome ", user_roles$individual, "!")),
           uiOutput("drowningSummary"),
           tags$div(
             tags$label("Pick a date (Optional)"),
@@ -245,7 +252,7 @@ ui <- dashboardPage(
         tabItem(
           tabName = "holiday_tab",
           column(2,
-                 h2(paste0("Welcome, ","Data Team","!")), 
+                 h2(paste0("Welcome, ",user_roles$team,"!")), 
                  uiOutput("calendarDrowningSummary"),   
                  
                  uiOutput("calendarYearSelector"),
@@ -307,7 +314,7 @@ ui <- dashboardPage(
         )
         ))
       )
-      if (Sys.getenv("USERNAME") %in% c("Chris", "Stella")) {
+      if (user_roles$individual %in% c("Chris", "Stella")) {
         tab_list <- c(tab_list, list(tabItem(tabName = "special_tab", fluidRow(
           column(
             12,
@@ -343,6 +350,8 @@ ui <- dashboardPage(
 
 
 server <- function(input, output, session) {
+  box_style <- "flex: 3; padding: 15px; border: 4px solid #3C8DBC; border-radius: 12px; background-color: #FDFDFE;"
+  
   dbQuerySafe <- function(query) {
     tryCatch({
       con <- dbConnect(
@@ -359,6 +368,68 @@ server <- function(input, output, session) {
       data.frame()
     })
   }
+  
+  renderDrowningSummaryCard <- function(row, tags_df, selected_tags, input_id_prefix) {
+    select_input_id <- paste0(input_id_prefix, row$DrowningID)
+    
+    tag_html <- if (!is.null(selected_tags) && length(selected_tags) > 0) {
+      paste(sapply(selected_tags, function(tag) {
+        sprintf(
+          "<div style='background-color: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 10px; padding: 5px 10px; margin: 5px; display: inline-block; font-size: 16px;'>%s</div>",
+          tag
+        )
+      }), collapse = "")
+    } else {
+      "<p>No tags selected.</p>"
+    }
+    
+    eth_text <- if (!(row$SubEthnicityDesc %in% c("Unknown", "Maori", "New Zealand European"))) {
+      paste0(row$EthnicityDesc, " (", row$SubEthnicityDesc, ")")
+    } else {
+      row$EthnicityDesc
+    }
+    
+    tags$div(
+      style = "display: flex; align-items: flex-start; margin-bottom: 20px;",
+      tags$div(
+        style = "flex: 3; padding: 15px; border: 4px solid #3C8DBC; border-radius: 12px; background-color: #FDFDFE;",
+        tags$table(
+          style = "width: 100%; table-layout: fixed;",
+          tags$tr(tags$td(tags$strong("Ethnicity:")), tags$td(eth_text),
+                  tags$td(tags$strong("Activity:")), tags$td(row$ActivityDesc)),
+          tags$tr(tags$td(tags$strong("Age:")), tags$td(ifelse(is.na(row$Age), "Unknown", row$Age)),
+                  tags$td(tags$strong("Site:")), tags$td(row$SiteDesc)),
+          tags$tr(tags$td(tags$strong("Location:")),
+                  tags$td(paste0(row$Location, " (", row$LocationDesc, ")"), colspan = 3)),
+          tags$tr(tags$td(tags$strong("Date:")), tags$td(format(as.Date(row$Date), "%e %b %Y")),
+                  tags$td(tags$strong("Time:")),
+                  tags$td(ifelse(is.na(row$TimeOfIncident), "Unknown", paste0(row$TimeOfIncident, ":00")))),
+          tags$tr(tags$td(tags$strong("Synopsis:")), tags$td(row$Synopsis, colspan = 3))
+        ),
+        tags$div(
+          tags$label("Select Tags:"),
+          tags$span(
+            class = "glyphicon glyphicon-info-sign",
+            `data-toggle` = "tooltip",
+            `title` = "Select existing tags from the dropdown or add a new one in the blue box.",
+            style = "cursor: pointer; margin-left: 5px;"
+          ),
+          tags$script(HTML("$(document).ready(function() { $('[data-toggle=\"tooltip\"]').tooltip(); });")),
+          selectInput(
+            inputId = select_input_id,
+            label = NULL,
+            choices = sort(unique(tags_df$Description)),
+            selected = sort(unique(selected_tags)),
+            multiple = TRUE,
+            width = "100%"
+          )
+        ),
+        tags$p(style = "margin-top: 10px; color: #FAFAFA;", paste(row$DrowningID))
+      ),
+      tags$div(style = "flex: 1; margin-left: 10px;", HTML(tag_html))
+    )
+  }
+  
   
   dbError <- reactiveVal(NULL)
   tag_inputs <- reactiveValues()
@@ -385,7 +456,7 @@ server <- function(input, output, session) {
     full_tag_df()  # <- add this dependency so it updates when tags change
     
     query <- paste0("GetDrowningTagTable 'Drowning', '",
-                    Sys.getenv("USERNAME"),
+                    user_roles$individual,
                     "'")
     result <- dbQuerySafe(query)
     
@@ -470,12 +541,12 @@ server <- function(input, output, session) {
   
   con <- GetWSNZAzureConnection()
   
-  Tags = dbQuerySafe(paste("GetDrowningTagTable Tag, ", Sys.getenv("USERNAME")))
-  DrowningTag =  dbQuerySafe(paste("GetDrowningTagTable DrowningTag, ", Sys.getenv("USERNAME")))
+  Tags = dbQuerySafe(paste("GetDrowningTagTable Tag, ", user_roles$individual))
+  DrowningTag =  dbQuerySafe(paste("GetDrowningTagTable DrowningTag, ", user_roles$individual))
   
   
   output$locationSelect <- renderUI({
-    loc_df <- dbQuerySafe(paste("GetDrowningTagTable Location, ", Sys.getenv("USERNAME")))
+    loc_df <- dbQuerySafe(paste("GetDrowningTagTable Location, ", user_roles$individual))
     
     selectInput(
       "locationSelect",
@@ -568,7 +639,7 @@ server <- function(input, output, session) {
             sprintf("EXEC DrowningTagInsertion '%s', '%s', '%s';",
                     row$DrowningID,
                     gsub("'", "''", tag),
-                    Sys.getenv("USERNAME"))
+                    user_roles$individual)
           })
           lapply(insert_queries, dbQuerySafe)
         }
@@ -578,7 +649,7 @@ server <- function(input, output, session) {
             sprintf("EXEC DrowningTagDeletion '%s', '%s', '%s';",
                     row$DrowningID,
                     gsub("'", "''", tag),
-                    Sys.getenv("USERNAME"))
+                    user_roles$individual)
           })
           lapply(delete_queries, dbQuerySafe)
         }
@@ -595,7 +666,7 @@ server <- function(input, output, session) {
             data.frame(
               DrowningID = row$DrowningID,
               TagID = Tags$TagID[Tags$Description %in% added_tags],
-              UserName = Sys.getenv("USERNAME"),
+              UserName = user_roles$individual,
               stringsAsFactors = FALSE
             )
           )
@@ -620,7 +691,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$tabs, {
     if (input$tabs == "weekly_summary") {
-      query <- sprintf("GetDrowningTagTable 'DrowningTag_AUDIT', '%s'", Sys.getenv("USERNAME"))
+      query <- sprintf("GetDrowningTagTable 'DrowningTag_AUDIT', '%s'", user_roles$individual)
       audit_data(dbQuerySafe(query))
     }else if (input$tabs == "special_tab") {
       latest_week <- tail(valid_weeks_all_tags(), 1)
@@ -634,7 +705,7 @@ server <- function(input, output, session) {
     datatable(audit_data(), options = list(pageLength = 15), rownames = FALSE)
   })
   observe({
-    query <- sprintf("GetDrowningTagTable 'DrowningTag_AUDIT', '%s'", Sys.getenv("USERNAME"))
+    query <- sprintf("GetDrowningTagTable 'DrowningTag_AUDIT', '%s'", user_roles$individual)
     audit_data(dbQuerySafe(query))
   })
   # Display total already tagged the welcome message
@@ -688,7 +759,7 @@ server <- function(input, output, session) {
     latest_week <- get_latest_untagged_week(
       df(),
       DrowningTag,
-      Sys.getenv("USERNAME"),
+      user_roles$individual,
       input$locationSelect,
       input$periodSelect
     )
@@ -758,171 +829,92 @@ server <- function(input, output, session) {
   output$weeklySummaryTable <- renderUI({
     hide("loading-overlay")
     
-    tryCatch({
-      data <- weekly_data()
-      if (nrow(data) == 0)
-        return(HTML("<p>No drowning incidents found for the selected week.</p>"))
-      
-      
-      
-      summary_ui <- lapply(1:nrow(data), function(i) {
-        row <- data[i, ]
-        select_input_id <- paste0("weeklyTags_", row$DrowningID)  # Unique selectInput ID for each incident
-        
-        # Get selected tags
-        selected_tags <- if (!is.null(input[[select_input_id]]))
-          input[[select_input_id]]
-        else
-          NULL
-        
-        # Generate HTML for selected tags
-        tag_html <- if (!is.null(selected_tags) &&
-                        length(selected_tags) > 0) {
-          paste(sapply(selected_tags, function(tag) {
-            sprintf(
-              "<div style='background-color: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 10px; padding: 5px 10px; margin: 5px; display: inline-block; font-size: 16px;'>%s</div>",
-              tag
-            )
-          }), collapse = "")
-        } else {
-          "<p>No tags selected.</p>"
-        }
-        
-        if (!(row$SubEthnicityDesc %in% c("Unknown", "Maori", "New Zealand European"))) {
-          eth_text = paste0(row$EthnicityDesc, " (", row$SubEthnicityDesc, ")")
-        }  else{
-          eth_text = row$EthnicityDesc
-        }
-        tags$div(
-          style = "display: flex; align-items: flex-start; margin-bottom: 20px;",
-          tags$div(
-            style = "flex: 3; padding: 15px; border: 4px solid #3C8DBC; border-radius: 12px; background-color: #FDFDFE;",
-            tags$table(
-              style = "width: 100%; table-layout: fixed;",
-              tags$tr(
-                tags$td(tags$strong("Ethnicity:")),
-                tags$td(eth_text),
-                tags$td(tags$strong("Activity:")),
-                tags$td(row$ActivityDesc)
-              ),
-              tags$tr(
-                tags$td(tags$strong("Age:")),
-                tags$td(ifelse(
-                  is.na(row$Age), "Unknown", row$Age
-                )),
-                tags$td(tags$strong("Site:")),
-                tags$td(row$SiteDesc)
-              ),
-              tags$tr(tags$td(tags$strong(
-                "Location:"
-              )), tags$td(
-                paste0(row$Location, " (", row$LocationDesc, ")"),
-                colspan = 3
-              )),
-              tags$tr(
-                tags$td(tags$strong("Date:")),
-                tags$td(format(as.Date(row$Date), "%e %b %Y")),
-                tags$td(tags$strong("Time:")),
-                tags$td(ifelse(
-                  is.na(row$TimeOfIncident),
-                  "Unknown",
-                  paste0(row$TimeOfIncident, ":00")
-                ))
-              ),
-              tags$tr(
-                tags$td(tags$strong("Synopsis:")),
-                tags$td(row$Synopsis, colspan = 3)
-              )
-              
-            ),
-            
-            tags$div(
-              tags$label("Select Tags:"),
-              tags$span(
-                class = "glyphicon glyphicon-info-sign",
-                id = "tag_info",
-                `data-toggle` = "tooltip",
-                `title` = "Select existing tags from the dropdown or add a new one in the blue box on the right.",
-                style = "cursor: pointer; margin-left: 5px;"
-              ),
-              tags$script(
-                HTML(
-                  "$(document).ready(function() { $('[data-toggle=\"tooltip\"]').tooltip(); });"
-                )
-              ),
-              selectInput(
-                inputId = select_input_id,
-                label =  NULL,
-                choices = sort(unique(Tags$Description)),
-                # Order dropdown choices alphabetically
-                selected = sort(unique(full_tag_df()$Description[full_tag_df()$DrowningID == row$DrowningID])),
-                # Order selected values alphabetically
-                multiple = TRUE,
-                width = "100%"
-              )
-            ),
-            tags$p(style = "margin-top: 10px; color: #FAFAFA;", paste(row$DrowningID))
-          ),
-          
-          tags$div(style = "flex: 1; margin-left: 10px;", HTML(tag_html))
-        )
-      })
-    }, error = function(e) {
-      dbError(conditionMessage(e))
+    data <- weekly_data()
+    if (nrow(data) == 0) return(HTML("<p>No drowning incidents found for the selected week.</p>"))
+    
+    tag_list <- full_tag_df()
+    lapply(seq_len(nrow(data)), function(i) {
+      row <- data[i, ]
+      selected_tags <- tag_list$Description[tag_list$DrowningID == row$DrowningID]
+      renderDrowningSummaryCard(row, Tags, selected_tags, input_id_prefix = "weeklyTags_")
     })
+  })  
+  
+  
+
+  
+  handle_week_navigation <- function(direction = c("next", "previous"), tab = input$tabs) {
+    direction <- match.arg(direction)
+    
+    switch(tab,
+           "weekly_summary" = {
+             req(input$date)
+             new_date <- as.Date(input$date) + ifelse(direction == "next", 7, -7)
+             
+             if (input$periodSelect == "Current Year") {
+               min_date <- as.Date("2025-01-01")
+               new_date <- max(min_date, min(new_date, Sys.Date()))
+             } else {
+               new_date <- min(new_date, Sys.Date())
+             }
+             
+             updateDateInput(session, "date", value = new_date)
+           },
+           
+           "holiday_tab" = {
+             if (is.null(input$calendarHoliday) || input$calendarHoliday == "") {
+               showNotification("Please select a holiday first.", type = "error")
+             } else {
+               year_delta <- ifelse(direction == "next", 1, -1)
+               calendar_df <- dbQuerySafe(paste0("GetDrowningTagTable Calendar, '", user_roles$team, "'"))
+               
+               current_event_years <- calendar_df$Year[calendar_df$Event == input$calendarHoliday]
+               if (direction == "next" && calendar_year() < max(current_event_years, na.rm = TRUE)) {
+                 calendar_year(calendar_year() + 1)
+               } else if (direction == "previous" && calendar_year() > min(current_event_years, na.rm = TRUE)) {
+                 calendar_year(calendar_year() - 1)
+               } else {
+                 showNotification(sprintf("No %s years available.", direction), type = "warning")
+               }
+             }
+           },
+           
+           "special_tab" = {
+             req(input$dateAllWeeks)
+             current <- floor_date(as.Date(input$dateAllWeeks), "week", week_start = 1)
+             week_list <- valid_weeks_all_tags()
+             new_week <- if (direction == "next") {
+               min(week_list[week_list > current], na.rm = TRUE)
+             } else {
+               max(week_list[week_list < current], na.rm = TRUE)
+             }
+             
+             if (!is.finite(new_week)) {
+               showNotification(sprintf("No %s weeks with incidents.", direction), type = "message")
+             } else {
+               updateDateInput(session, "dateAllWeeks", value = new_week)
+             }
+           }
+    )
+  }
+  observeEvent(input$left_arrow, {
+    handle_week_navigation("previous")
+  })
+  
+  observeEvent(input$right_arrow, {
+    handle_week_navigation("next")
+  })
+  
+  observeEvent(input$displayPreviousWeek, {
+    handle_week_navigation("previous")
+  })
+  
+  observeEvent(input$displayNextWeek, {
+    handle_week_navigation("next")
   })
   
   
   
-  observeEvent(input$displayNextWeek | input$right_arrow, {
-    if (input$tabs != "weekly_summary") return()
-    
-    req(input$date)  # Ensure date is valid
-    
-    new_date <- as.Date(input$date) + 7
-    
-    if (new_date > Sys.Date()) {
-      # If new_date is beyond Sys.Date(), reset it to Sys.Date()
-      if (as.Date(input$date) == Sys.Date()) {
-        showNotification("Please pick a valid date (Not in the future)", type = "error")
-      } else {
-        new_date <- Sys.Date()
-        updateDateInput(session, "date", value = new_date)
-        filtered_df <- df()[df()$Date >= floor_date(new_date, "week", week_start = 1) &
-                              df()$Date <= ceiling_date(new_date, "week", week_start = 1) - days(1), ]
-        weekly_data(filtered_df)
-      }
-    } else {
-      # Normal case: new_date is within valid range
-      updateDateInput(session, "date", value = new_date)
-      filtered_df <- df()[df()$Date >= floor_date(new_date, "week", week_start = 1) &
-                            df()$Date <= ceiling_date(new_date, "week", week_start = 1) - days(1), ]
-      weekly_data(filtered_df)
-    }
-  }, ignoreInit = TRUE)
-  
-  # Left arrow and Prev Week Button
-  observeEvent(input$displayPreviousWeek | input$left_arrow, {
-    if (input$tabs != "weekly_summary") return()
-    
-    req(input$date)
-    new_date <- as.Date(input$date) - 7
-    
-    # Only restrict for Current Year
-    if (input$periodSelect == "Current Year" && new_date < as.Date('2025-01-01')) {
-      if (as.Date(input$date) == as.Date('2025-01-01')) {
-        showNotification("Please pick a date from 2025", type = "error")
-      } else {
-        new_date <- as.Date('2025-01-01')
-      }
-    }
-    
-    # Now always update the date and weekly data regardless of restriction
-    updateDateInput(session, "date", value = new_date)
-    filtered_df <- df()[df()$Date >= floor_date(new_date, "week", week_start = 1) &
-                          df()$Date <= ceiling_date(new_date, "week", week_start = 1) - days(1), ]
-    weekly_data(filtered_df)
-  }, ignoreNULL = TRUE)
   
   # addLabel
   observeEvent(input$weekAddLabel, {
@@ -992,39 +984,41 @@ server <- function(input, output, session) {
     }
   }, ignoreInit = TRUE)
   
-  if (Sys.getenv("USERNAME") %in% c("Chris", "Stella")) {
-    # Create a reactive value to store the filtered data
-    full_tag_df <- reactiveVal(merge(Tags, DrowningTag, by = 'TagID'))
-    weekly_data_all_tags <- reactiveVal(data.frame())
+  
+  # Create a reactive value to store the filtered data
+  full_tag_df <- reactiveVal(merge(Tags, DrowningTag, by = 'TagID'))
+  weekly_data_all_tags <- reactiveVal(data.frame())
+  
+  
+  
+  
+  
+  output$weeklyTableAllTagsHasData <- reactive({
+    nrow(weekly_data_all_tags()) > 0
+  })
+  
+  outputOptions(output, "weeklyTableAllTagsHasData", suspendWhenHidden = FALSE)
+  
+  output$weeklySummaryTableAllTags <- renderUI({
+    hide("loading-overlay")
     
-    
-    
-    
-    
-    output$weeklyTableAllTagsHasData <- reactive({
-      nrow(weekly_data_all_tags()) > 0
-    })
-    
-    outputOptions(output, "weeklyTableAllTagsHasData", suspendWhenHidden = FALSE)
-    
-    output$weeklySummaryTableAllTags <- renderUI({
-      tryCatch({
-        data <- weekly_data_all_tags()
-        if (length(input$locationSelectAllTags) > 0) {
-          data <- data[data$LocationDesc %in% input$locationSelectAllTags, ]
-        }
+    tryCatch({
+      data <- weekly_data_all_tags()
+      if (length(input$locationSelectAllTags) > 0) {
+        data <- data[data$LocationDesc %in% input$locationSelectAllTags, ]
+      }
+      
+      if (nrow(data) == 0)
+        return(HTML(
+          "<p>No drowning incidents found for the selected week.</p>"
+        ))
+      summary_ui <- lapply(1:nrow(data), function(i) {
+        row <- data[i, ]
+        select_input_id <- paste0("weeklyTags_", row$DrowningID)  # Unique selectInput ID for each incident
         
-        if (nrow(data) == 0)
-          return(HTML(
-            "<p>No drowning incidents found for the selected week.</p>"
-          ))
-        summary_ui <- lapply(1:nrow(data), function(i) {
-          row <- data[i, ]
-          select_input_id <- paste0("weeklyTags_", row$DrowningID)  # Unique selectInput ID for each incident
-          
-          # Query database to get selected tags for this drowning case
-          selected_tags_query <- sprintf(
-            "SELECT
+        # Query database to get selected tags for this drowning case
+        selected_tags_query <- sprintf(
+          "SELECT
             TagID, COUNT(*) AS Count, STRING_AGG(LEFT(Username,1), ', ') WITHIN GROUP (ORDER BY LEFT(Username,1)) as Usernames
             FROM DrowningTag
             WHERE DrowningID =   %d
@@ -1032,190 +1026,161 @@ server <- function(input, output, session) {
             ORDER BY Count DESC
 
             ",
-            row$DrowningID
-          )
-          selected_tags_df <- dbQuerySafe(selected_tags_query)
-          
-          # Convert TagID to Description and format as "Description (Count)"
-          selected_tags <- if (nrow(selected_tags_df) > 0) {
-            paste0(Tags$Description[match(selected_tags_df$TagID, Tags$TagID)],
-                   # Get tag descriptions
-                   " (",
-                   selected_tags_df$Usernames,
-                   ") ")
-          } else {
-            NULL  # If no tags exist, return NULL
-          }
-          
-          
-          tag_html <- if (!is.null(selected_tags_df) && nrow(selected_tags_df) > 0) {
-            paste(sapply(1:nrow(selected_tags_df), function(i) {
-              tag_desc <- Tags$Description[match(selected_tags_df$TagID[i], Tags$TagID)]
-              usernames <- selected_tags_df$Usernames[i]
-              user_count <- lengths(regmatches(usernames, gregexpr("[A-Za-z]", usernames)))
-              
-              border_style <- if (user_count >= 4) {
-                "2px solid #3C8DBC"  # Blue border
-              } else {
-                "1px solid #ccc"     # Default gray border
-              }
-              
-              sprintf(
-                "<div style='background-color: #f0f0f0; color: #333; border: %s; border-radius: 10px; padding: 5px 10px; margin: 5px; display: inline-block; font-size: 16px;'>%s (%s)</div>",
-                border_style,
-                tag_desc,
-                usernames
-              )
-            }), collapse = "")
-          } else {
-            "<p>No tags selected.</p>"
-          }
-          
-          if (!(row$SubEthnicityDesc %in% c("Unknown", "Maori", "New Zealand European"))) {
-            eth_text = paste0(row$EthnicityDesc, " (", row$SubEthnicityDesc, ")")
-          } else{
-            eth_text = row$EthnicityDesc
-          }
-          tags$div(
-            style = "display: flex; align-items: flex-start; margin-bottom: 20px;",
-            tags$div(
-              style = "flex: 3; padding: 15px; border: 4px solid #3C8DBC; border-radius: 12px; background-color: #FDFDFE;",
-              tags$table(
-                style = "width: 100%; table-layout: fixed; font-size: 16px;",
-                tags$tr(
-                  tags$td(tags$strong("Ethnicity:")),
-                  tags$td(eth_text),
-                  tags$td(tags$strong("Activity:")),
-                  tags$td(row$ActivityDesc)
-                ),
-                tags$tr(
-                  tags$td(tags$strong("Age:")),
-                  tags$td(ifelse(
-                    is.na(row$Age), "Unknown", row$Age
-                  )),
-                  tags$td(tags$strong("Site:")),
-                  tags$td(row$SiteDesc)
-                ),
-                tags$tr(tags$td(tags$strong(
-                  "Location:"
-                )), tags$td(
-                  paste0(row$Location, " (", row$LocationDesc, ")"),
-                  colspan = 3
-                )),
-                tags$tr(
-                  tags$td(tags$strong("Date:")),
-                  tags$td(format(as.Date(row$Date), "%e %b %Y")),
-                  tags$td(tags$strong("Time:")),
-                  tags$td(ifelse(
-                    is.na(row$TimeOfIncident),
-                    "Unknown",
-                    paste0(row$TimeOfIncident, ":00")
-                  ))
-                ),
-                tags$tr(
-                  tags$td(tags$strong("Synopsis:")),
-                  tags$td(row$Synopsis, colspan = 3)
-                )
-              ),
-              tags$p(style = "margin-top: 10px; color: #FAFAFA;", paste(row$DrowningID))
-              
-            ),
+          row$DrowningID
+        )
+        selected_tags_df <- dbQuerySafe(selected_tags_query)
+        
+        # Convert TagID to Description and format as "Description (Count)"
+        selected_tags <- if (nrow(selected_tags_df) > 0) {
+          paste0(Tags$Description[match(selected_tags_df$TagID, Tags$TagID)],
+                 # Get tag descriptions
+                 " (",
+                 selected_tags_df$Usernames,
+                 ") ")
+        } else {
+          NULL  # If no tags exist, return NULL
+        }
+        
+        
+        tag_html <- if (!is.null(selected_tags_df) && nrow(selected_tags_df) > 0) {
+          paste(sapply(1:nrow(selected_tags_df), function(i) {
+            tag_desc <- Tags$Description[match(selected_tags_df$TagID[i], Tags$TagID)]
+            usernames <- selected_tags_df$Usernames[i]
+            user_count <- lengths(regmatches(usernames, gregexpr("[A-Za-z]", usernames)))
             
-            tags$div(style = "flex: 1; margin-left: 10px;", HTML(tag_html))
-          )
-        })
-      }, error = function(e) {
-        showNotification(paste("Error rendering weekly summary table:", e$message),
-                         type = "error")
-        HTML("<p>Error displaying data.</p>")
+            border_style <- if (user_count >= 4) {
+              "2px solid #3C8DBC"  # Blue border
+            } else {
+              "1px solid #ccc"     # Default gray border
+            }
+            
+            sprintf(
+              "<div style='background-color: #f0f0f0; color: #333; border: %s; border-radius: 10px; padding: 5px 10px; margin: 5px; display: inline-block; font-size: 16px;'>%s (%s)</div>",
+              border_style,
+              tag_desc,
+              usernames
+            )
+          }), collapse = "")
+        } else {
+          "<p>No tags selected.</p>"
+        }
+        
+        if (!(row$SubEthnicityDesc %in% c("Unknown", "Maori", "New Zealand European"))) {
+          eth_text = paste0(row$EthnicityDesc, " (", row$SubEthnicityDesc, ")")
+        } else{
+          eth_text = row$EthnicityDesc
+        }
+        tags$div(
+          style = "display: flex; align-items: flex-start; margin-bottom: 20px;",
+          tags$div(
+            style = box_style,
+            tags$table(
+              style = "width: 100%; table-layout: fixed; font-size: 16px;",
+              tags$tr(
+                tags$td(tags$strong("Ethnicity:")),
+                tags$td(eth_text),
+                tags$td(tags$strong("Activity:")),
+                tags$td(row$ActivityDesc)
+              ),
+              tags$tr(
+                tags$td(tags$strong("Age:")),
+                tags$td(ifelse(
+                  is.na(row$Age), "Unknown", row$Age
+                )),
+                tags$td(tags$strong("Site:")),
+                tags$td(row$SiteDesc)
+              ),
+              tags$tr(tags$td(tags$strong(
+                "Location:"
+              )), tags$td(
+                paste0(row$Location, " (", row$LocationDesc, ")"),
+                colspan = 3
+              )),
+              tags$tr(
+                tags$td(tags$strong("Date:")),
+                tags$td(format(as.Date(row$Date), "%e %b %Y")),
+                tags$td(tags$strong("Time:")),
+                tags$td(ifelse(
+                  is.na(row$TimeOfIncident),
+                  "Unknown",
+                  paste0(row$TimeOfIncident, ":00")
+                ))
+              ),
+              tags$tr(
+                tags$td(tags$strong("Synopsis:")),
+                tags$td(row$Synopsis, colspan = 3)
+              )
+            ),
+            tags$p(style = "margin-top: 10px; color: #FAFAFA;", paste(row$DrowningID))
+            
+          ),
+          
+          tags$div(style = "flex: 1; margin-left: 10px;", HTML(tag_html))
+        )
       })
+    }, error = function(e) {
+      showNotification(paste("Error rendering weekly summary table:", e$message),
+                       type = "error")
+      HTML("<p>Error displaying data.</p>")
     })
+  })
+  
+  
+  
+
+  
+
+  
+  
+  valid_weeks_all_tags <- reactive({
+    req(df())
+    df_data <- df()
+    if (length(input$locationSelectAllTags) > 0) {
+      df_data <- df_data[df_data$LocationDesc %in% input$locationSelectAllTags, ]
+    }
+    df_data$WeekStart <- lubridate::floor_date(df_data$Date, unit = "week", week_start = 1)
+    sort(unique(df_data$WeekStart))
+  })
+  
+  
+  
+  observeEvent(input$dateAllWeeks, {
+    req(input$dateAllWeeks)
+    selected_week <- floor_date(as.Date(input$dateAllWeeks), "week", week_start = 1)
     
+    if (!(selected_week %in% valid_weeks_all_tags())) {
+      showNotification("Invalid week. Please pick a week with an incident.", type = "error")
+      return()
+    }
     
+    monday <- selected_week
+    sunday <- ceiling_date(selected_week, "week", week_start = 1) - days(1)
     
-    observeEvent(input$displayNextWeekAllTags | input$right_arrow, {
-      if (input$tabs != "special_tab") return()
-      
-      current <- floor_date(as.Date(input$dateAllWeeks), "week", week_start = 1)
-      next_weeks <- valid_weeks_all_tags()[valid_weeks_all_tags() > current]
-      
-      if (length(next_weeks) == 0) {
-        showNotification("No later weeks with incidents.", type = "message")
-        return()
-      }
-      
-      new_date <- min(next_weeks)
-      updateDateInput(session, "dateAllWeeks", value = new_date)
-    }, ignoreInit = TRUE)
+    filtered_df <- df()[df()$Date >= monday & df()$Date <= sunday, ]
     
+    if (length(input$locationSelectAllTags) > 0) {
+      filtered_df <- filtered_df[filtered_df$LocationDesc %in% input$locationSelectAllTags, ]
+    }
     
-    observeEvent(input$displayPreviousWeekAllTags | input$left_arrow, {
-      if (input$tabs != "special_tab") return()
-      
-      current <- floor_date(as.Date(input$dateAllWeeks), "week", week_start = 1)
-      previous_weeks <- valid_weeks_all_tags()[valid_weeks_all_tags() < current]
-      
-      if (length(previous_weeks) == 0) {
-        showNotification("No earlier weeks with incidents.", type = "message")
-        return()
-      }
-      
-      new_date <- max(previous_weeks)
-      updateDateInput(session, "dateAllWeeks", value = new_date)
-    }, ignoreInit = TRUE)
+    weekly_data_all_tags(filtered_df)
+  }, ignoreInit = TRUE)
+  
+  observeEvent(Tags, {
+    data <- weekly_data_all_tags()
     
-    
-    
-    valid_weeks_all_tags <- reactive({
-      req(df())
-      df_data <- df()
-      if (length(input$locationSelectAllTags) > 0) {
-        df_data <- df_data[df_data$LocationDesc %in% input$locationSelectAllTags, ]
-      }
-      df_data$WeekStart <- lubridate::floor_date(df_data$Date, unit = "week", week_start = 1)
-      sort(unique(df_data$WeekStart))
-    })
-    
-    
-    
-    observeEvent(input$dateAllWeeks, {
-      req(input$dateAllWeeks)
-      selected_week <- floor_date(as.Date(input$dateAllWeeks), "week", week_start = 1)
-      
-      if (!(selected_week %in% valid_weeks_all_tags())) {
-        showNotification("Invalid week. Please pick a week with an incident.", type = "error")
-        return()
-      }
-      
-      monday <- selected_week
-      sunday <- ceiling_date(selected_week, "week", week_start = 1) - days(1)
-      
-      filtered_df <- df()[df()$Date >= monday & df()$Date <= sunday, ]
-      
-      if (length(input$locationSelectAllTags) > 0) {
-        filtered_df <- filtered_df[filtered_df$LocationDesc %in% input$locationSelectAllTags, ]
-      }
-      
-      weekly_data_all_tags(filtered_df)
-    }, ignoreInit = TRUE)
-    
-    observeEvent(Tags, {
-      data <- weekly_data_all_tags()
-      
-      for (i in 1:nrow(data)) {
-        row <- data[i, ]
-        select_input_id <- paste0("weeklyTags_", row$DrowningID)
-        updateAllWeeksSelectInput(session,
-                                  inputId = select_input_id,
-                                  choices = unique(Tags$Description))
-      }
-    }, ignoreInit = TRUE)
-    
-  }
+    for (i in 1:nrow(data)) {
+      row <- data[i, ]
+      select_input_id <- paste0("weeklyTags_", row$DrowningID)
+      updateAllWeeksSelectInput(session,
+                                inputId = select_input_id,
+                                choices = unique(Tags$Description))
+    }
+  }, ignoreInit = TRUE)
+  
   
 
   output$locationSelectAllTags <- renderUI({
-    loc_df <- dbQuerySafe(paste("GetDrowningTagTable Location, ", Sys.getenv("USERNAME")))
+    loc_df <- dbQuerySafe(paste("GetDrowningTagTable Location, ", user_roles$individual))
     
     selectInput(
       "locationSelectAllTags",
@@ -1245,6 +1210,7 @@ server <- function(input, output, session) {
   })
   
   calendar_data <- reactiveVal(data.frame())
+  calendar_year <- reactiveVal(year(Sys.Date()))
   
   # Function to filter incidents based on selected holidays and buffer
   observe({
@@ -1252,40 +1218,40 @@ server <- function(input, output, session) {
     
     holidays <- input$calendarHoliday
     buffer <- input$dayBuffer
+    selected_year <- calendar_year()
     
     if (is.null(holidays) || length(holidays) == 0) {
       calendar_data(data.frame())
       return()
     }
     
-    calendar_df <- dbQuerySafe("GetDrowningTagTable Calendar, 'Data Team'")
+    calendar_df <- dbQuerySafe(paste0("GetDrowningTagTable Calendar, '", user_roles$team, "'"))
     
-    # Filter calendar table by selected holidays
-    calendar_df <- calendar_df[calendar_df$Event %in% holidays, ]
+    # Filter by selected event(s) and selected year
+    calendar_df <- calendar_df[
+      calendar_df$Event %in% holidays & calendar_df$Year == selected_year,
+    ]
     
     if (nrow(calendar_df) == 0) {
       calendar_data(data.frame())
       return()
     }
     
-    # Apply buffer to start and end dates
     calendar_df$StartDate <- as.Date(calendar_df$StartDate) - days(buffer)
-    calendar_df$EndDate <- as.Date(calendar_df$EndDate) + days(buffer)
+    calendar_df$EndDate   <- as.Date(calendar_df$EndDate) + days(buffer)
     
     drown_df <- df()
     drown_df$Date <- as.Date(drown_df$Date)
     
-    # Filter drownings within any buffered holiday range
     matched <- do.call(rbind, lapply(1:nrow(calendar_df), function(i) {
       range <- calendar_df[i, ]
       drown_df[drown_df$Date >= range$StartDate & drown_df$Date <= range$EndDate, ]
     }))
     
-    calendar_data(unique(matched))  # remove duplicates
+    calendar_data(unique(matched))
   })
   
   # Year navigation
-  calendar_year <- reactiveVal(year(Sys.Date()))
   
 
   
@@ -1300,158 +1266,54 @@ server <- function(input, output, session) {
   
   
   # UI Rendering
+
   output$calendarSummaryTable <- renderUI({
     hide("loading-overlay")
+    
     data <- calendar_data()
-    
-    # Prepare title and subtitle first (this always runs)
+    holidays <- input$calendarHoliday
     buffer <- input$dayBuffer
-    holiday_name <- input$calendarHoliday
-    req(input$calendarHoliday)
-    calendar_df <- dbQuerySafe("GetDrowningTagTable Calendar, 'Data Team'")
+    selected_year <- calendar_year()
+    
+    calendar_df <- dbQuerySafe(paste0("GetDrowningTagTable Calendar, '", user_roles$team, "'"))
     calendar_df <- calendar_df[
-      calendar_df$Event == holiday_name & calendar_df$Year == calendar_year(),
+      calendar_df$Event %in% holidays & calendar_df$Year == selected_year,
     ]
-    display_name <- input$calendarHoliday
-    if (display_name == "King's Birthday" && calendar_year() < 2022) {
-      display_name <- "Queen's Birthday"
-    }
     
+    calendar_df$StartDate <- as.Date(calendar_df$StartDate) - days(buffer)
+    calendar_df$EndDate   <- as.Date(calendar_df$EndDate) + days(buffer)
     
-    if (nrow(calendar_df) > 0) {
-      calendar_df$StartDate <- as.Date(calendar_df$StartDate) - days(buffer)
-      calendar_df$EndDate <- as.Date(calendar_df$EndDate) + days(buffer)
-      
-      title_ui <- tagList(
-        
-        tags$h3(style = "margin-top: 0; font-weight: bold;",
-                paste0(display_name, " ", calendar_year()))
-        ,
-        tags$h5(
-          paste0(
-            "Results from ",
-            format(min(calendar_df$StartDate), "%d %b %Y"),
-            " - ",
-            format(max(calendar_df$EndDate), "%d %b %Y"),
-            " (using a ", buffer, "-day buffer)"
-          ),
-          style = "color: #555;"
-        )
-      )
-    } else {
-      title_ui <- tagList(
-        tags$h3(style = "margin-top: 0; font-weight: bold;",
-                paste0(display_name, " ", calendar_year()))
-        ,
-        tags$h5("No calendar entry found for this holiday in the selected year.",
-                style = "color: #999; font-style: italic;")
-      )
-    }
-    
-    # Now show appropriate message if no data
     if (nrow(data) == 0) {
-      return(tagList(
-        title_ui,
-        HTML("<p>No incidents match the selected holiday(s).</p>")
-      ))
+      if (nrow(calendar_df) == 0) {
+        return(HTML(sprintf(
+          "<h3>No matching holidays found for <strong>%s</strong> in <strong>%d</strong>.</h3>",
+          input$calendarHoliday,
+          selected_year
+         
+        )))
+      } else {
+        return(HTML(sprintf(
+          "<h3>No drowning incidents found for <strong>%s</strong> with a %d-day buffer (%s to %s).</h3>",
+          input$calendarHoliday,
+          input$dayBuffer,
+          format(min(calendar_df$StartDate), "%d %b %Y"),
+          format(max(calendar_df$EndDate), "%d %b %Y")
+        )))
+      }
     }
     
-    # Filter by calendar_year
-    data <- data[year(data$Date) == calendar_year(), ]
-    if (nrow(data) == 0) {
-      return(tagList(
-        title_ui,
-        HTML("<p>No incidents for the selected year.</p>")
-      ))
-    }
-    
-    # --- otherwise continue building summary_ui ---
-    summary_ui <- lapply(1:nrow(data), function(i) {
+    tag_list <- full_tag_df()
+    lapply(seq_len(nrow(data)), function(i) {
       row <- data[i, ]
-      select_input_id <- paste0("calendarTags_", row$DrowningID)
-      
-      selected_tags <- full_tag_df()$Description[full_tag_df()$DrowningID == row$DrowningID]
-      
-      tag_html <- if (!is.null(selected_tags) && length(selected_tags) > 0) {
-        paste(sapply(selected_tags, function(tag) {
-          sprintf(
-            "<div style='background-color: #f0f0f0; color: #333; border: 1px solid #ccc; border-radius: 10px; padding: 5px 10px; margin: 5px; display: inline-block; font-size: 16px;'>%s</div>",
-            tag
-          )
-        }), collapse = "")
-      } else {
-        "<p>No tags selected.</p>"
-      }
-      
-      if (!(row$SubEthnicityDesc %in% c("Unknown", "Maori", "New Zealand European"))) {
-        eth_text <- paste0(row$EthnicityDesc, " (", row$SubEthnicityDesc, ")")
-      } else {
-        eth_text <- row$EthnicityDesc
-      }
-      
-      tags$div(
-        style = "display: flex; align-items: flex-start; margin-bottom: 20px;",
-        tags$div(
-          style = "flex: 3; padding: 15px; border: 4px solid #3C8DBC; border-radius: 12px; background-color: #FDFDFE;",
-          tags$table(
-            style = "width: 100%; table-layout: fixed;",
-            tags$tr(
-              tags$td(tags$strong("Ethnicity:")),
-              tags$td(eth_text),
-              tags$td(tags$strong("Activity:")),
-              tags$td(row$ActivityDesc)
-            ),
-            tags$tr(
-              tags$td(tags$strong("Age:")),
-              tags$td(ifelse(is.na(row$Age), "Unknown", row$Age)),
-              tags$td(tags$strong("Site:")),
-              tags$td(row$SiteDesc)
-            ),
-            tags$tr(tags$td(tags$strong("Location:")), tags$td(
-              paste0(row$Location, " (", row$LocationDesc, ")"),
-              colspan = 3
-            )),
-            tags$tr(
-              tags$td(tags$strong("Date:")),
-              tags$td(format(as.Date(row$Date), "%e %b %Y")),
-              tags$td(tags$strong("Time:")),
-              tags$td(ifelse(is.na(row$TimeOfIncident), "Unknown", paste0(row$TimeOfIncident, ":00")))
-            ),
-            tags$tr(
-              tags$td(tags$strong("Synopsis:")),
-              tags$td(row$Synopsis, colspan = 3)
-            )
-          ),
-          tags$div(
-            tags$label("Select Tags:"),
-            tags$span(
-              class = "glyphicon glyphicon-info-sign",
-              id = "calendar_tag_info",
-              `data-toggle` = "tooltip",
-              `title` = "Select existing tags from the dropdown or add a new one in the blue box on the left.",
-              style = "cursor: pointer; margin-left: 5px;"
-            ),
-            tags$script(HTML("$(document).ready(function() { $('[data-toggle=\"tooltip\"]').tooltip(); });")),
-            selectInput(
-              inputId = select_input_id,
-              label = NULL,
-              choices = sort(unique(Tags$Description)),
-              selected = sort(unique(selected_tags)),
-              multiple = TRUE,
-              width = "100%"
-            )
-          ),
-          tags$p(style = "margin-top: 10px; color: #FAFAFA;", paste(row$DrowningID))
-        ),
-        tags$div(style = "flex: 1; margin-left: 10px;", HTML(tag_html))
-      )
+      selected_tags <- tag_list$Description[tag_list$DrowningID == row$DrowningID]
+      renderDrowningSummaryCard(row, Tags, selected_tags, input_id_prefix = "calendarTags_")
     })
-    
-    tagList(title_ui, summary_ui)
   })
   
+  
+  
   output$calendarHoliday <- renderUI({
-    loc_df <- dbQuerySafe("GetDrowningTagTable Calendar, 'Data Team'")
+    loc_df <- dbQuerySafe(paste0("GetDrowningTagTable Calendar, '", user_roles$team, "'"))
     
     div(style = "display: flex; align-items: center; gap: 10px; margin-top: 10px;",
         selectInput(
@@ -1466,41 +1328,50 @@ server <- function(input, output, session) {
   
   
   
-  observeEvent(input$calendarPrevYear, {
-    if (is.null(input$calendarHoliday) || input$calendarHoliday == "") {
-      showNotification("Please select a holiday first.", type = "error")
-    } else {
-      calendar_df <- dbQuerySafe("GetDrowningTagTable Calendar, 'Data Team'")
-      min_year <- min(calendar_df$Year, na.rm = TRUE)
-      
-      if (calendar_year() > min_year) {
-        calendar_year(calendar_year() - 1)
-      } else {
-        showNotification("No earlier years available.", type = "warning")
-      }
-    }
-  })
+  
   
   
   observeEvent(input$calendarNextYear, {
-    if (is.null(input$calendarHoliday) || input$calendarHoliday == "") {
-      showNotification("Please select a holiday first.", type = "error")
-    } else {
-      max_year <- year(Sys.Date())
-      
-      if (calendar_year() < max_year) {
-        calendar_year(calendar_year() + 1)
-      } else {
-        showNotification("No future years available.", type = "warning")
-      }
-    }
+    shinyjs::disable("calendarPrevYear")
+    shinyjs::disable("calendarNextYear")
+    
+    handle_week_navigation("next", "holiday_tab")
+    
+    invalidateLater(1000, session)
+    observe({
+      shinyjs::enable("calendarPrevYear")
+      shinyjs::enable("calendarNextYear")
+    })
   })
   
+  
+  observeEvent(input$calendarPrevYear, {
+    shinyjs::disable("calendarPrevYear")
+    shinyjs::disable("calendarNextYear")
+    
+    handle_week_navigation("previous", "holiday_tab")
+    
+    # re-enable after a short delay
+    invalidateLater(1000, session)
+    observe({
+      shinyjs::enable("calendarPrevYear")
+      shinyjs::enable("calendarNextYear")
+    })
+  })
+  
+  
+  observeEvent(input$displayPreviousWeekAllTags, {
+    handle_week_navigation("previous", "special_tab")
+  })
+  
+  observeEvent(input$displayNextWeekAllTags, {
+    handle_week_navigation("next", "special_tab")
+  })
   
   output$calendarYearSelector <- renderUI({
     req(input$calendarHoliday)
     
-    calendar_df <- dbQuerySafe("GetDrowningTagTable Calendar, 'Data Team'")
+    calendar_df <- dbQuerySafe(paste0("GetDrowningTagTable Calendar, '", user_roles$team, "'"))
     available_years <- min(calendar_df$Year[calendar_df$Event==input$calendarHoliday]):year(Sys.Date())
     
     selectInput(
@@ -1521,23 +1392,56 @@ server <- function(input, output, session) {
   })
   
   total_drownings_all <- reactive({
-    data <- calendar_data()
-    #print(data)
-    nrow(data)
+    req(df(), input$calendarHoliday)
+    
+    # Get all calendar entries for the selected holiday (all years)
+    calendar_df_all <- dbQuerySafe(paste0("GetDrowningTagTable Calendar, '", user_roles$team, "'"))
+    calendar_df_all <- calendar_df_all[calendar_df_all$Event %in% input$calendarHoliday, ]
+    
+    if (nrow(calendar_df_all) == 0) return(0)
+    
+    # Use buffer
+    calendar_df_all$StartDate <- as.Date(calendar_df_all$StartDate) - days(input$dayBuffer)
+    calendar_df_all$EndDate   <- as.Date(calendar_df_all$EndDate) + days(input$dayBuffer)
+    
+    drown_df <- df()
+    drown_df$Date <- as.Date(drown_df$Date)
+    
+    matched <- do.call(rbind, lapply(1:nrow(calendar_df_all), function(i) {
+      range <- calendar_df_all[i, ]
+      drown_df[drown_df$Date >= range$StartDate & drown_df$Date <= range$EndDate, ]
+    }))
+    
+    nrow(unique(matched))
   })
   
   
+  
   tagged_drownings_all <- reactive({
-    data <- calendar_data()
+    req(full_tag_df(), input$calendarHoliday)
     
-    if (nrow(data) == 0) return(0)
+    calendar_df_all <- dbQuerySafe(paste0("GetDrowningTagTable Calendar, '", user_roles$team, "'"))
+    calendar_df_all <- calendar_df_all[calendar_df_all$Event %in% input$calendarHoliday, ]
     
-    drowning_ids <- unique(data$DrowningID)
-    tag_data <- full_tag_df()
+    if (nrow(calendar_df_all) == 0) return(0)
     
-    tagged_ids <- unique(tag_data$DrowningID[tag_data$DrowningID %in% drowning_ids])
+    calendar_df_all$StartDate <- as.Date(calendar_df_all$StartDate) - days(input$dayBuffer)
+    calendar_df_all$EndDate   <- as.Date(calendar_df_all$EndDate) + days(input$dayBuffer)
     
-    length(tagged_ids)
+    drown_df <- df()
+    drown_df$Date <- as.Date(drown_df$Date)
+    
+    matched <- do.call(rbind, lapply(1:nrow(calendar_df_all), function(i) {
+      range <- calendar_df_all[i, ]
+      drown_df[drown_df$Date >= range$StartDate & drown_df$Date <= range$EndDate, ]
+    }))
+    
+    if (nrow(matched) == 0) return(0)
+    
+    matched_ids <- unique(matched$DrowningID)
+    tagged_ids <- unique(full_tag_df()$DrowningID)
+    
+    length(intersect(matched_ids, tagged_ids))
   })
   
   
@@ -1552,38 +1456,9 @@ server <- function(input, output, session) {
     ))
   })
   
-  observeEvent(input$left_arrow, {
-    if (input$tabs == "holiday_tab") {
-      if (is.null(input$calendarHoliday) || input$calendarHoliday == "") {
-        showNotification("Please select a holiday first.", type = "error")
-      } else {
-        calendar_df <- dbQuerySafe("GetDrowningTagTable Calendar, 'Data Team'")
-        min_year <- min(calendar_df$Year[calendar_df$Event == input$calendarHoliday], na.rm = TRUE)
-        
-        if (calendar_year() > min_year) {
-          calendar_year(calendar_year() - 1)
-        } else {
-          showNotification("No earlier years available.", type = "warning")
-        }
-      }
-    }
-  })
+
   
-  observeEvent(input$right_arrow, {
-    if (input$tabs == "holiday_tab") {
-      if (is.null(input$calendarHoliday) || input$calendarHoliday == "") {
-        showNotification("Please select a holiday first.", type = "error")
-      } else {
-        max_year <- year(Sys.Date())
-        
-        if (calendar_year() < max_year) {
-          calendar_year(calendar_year() + 1)
-        } else {
-          showNotification("No future years available.", type = "warning")
-        }
-      }
-    }
-  })
+
 }
 
 shinyApp(ui = ui, server = server)
