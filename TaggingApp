@@ -99,6 +99,17 @@ ui <- dashboardPage(
         height: auto;
         text-align: center;
       }
+      .content-wrapper,
+      .right-side,
+      .main-footer {
+        background-color: #edf3f9 !important;
+      }
+      .wrapper,
+      .content-wrapper {
+        min-height: 100vh;
+        background-color: #edf3f9 !important;
+      }
+
     "
       )
     )),
