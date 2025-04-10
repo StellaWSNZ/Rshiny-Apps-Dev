@@ -14,31 +14,15 @@ required_packages <- c("shiny",
                        "later")
 
 
-
 new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
 if (length(new_packages))
   install.packages(new_packages)
-
 lapply(required_packages, library, character.only = TRUE)
 if (exists("con") && dbIsValid(con)) {
   dbDisconnect(con)
 }
-dbQuerySafe <- function(query) {
-  tryCatch({
-    con <- dbConnect(
-      odbc(),
-      Driver = "SQL Server",
-      Server = "heimatau.database.windows.net",
-      Database = "WSNZ",
-      Port = 1433,
-      Uid = "wsnztagger",
-      Pwd = "tag_girl123"
-    )
-    dbGetQuery(con, query)
-  }, error = function(e) {
-    data.frame()
-  })
-}
+
+
 glossary_df <- data.frame(
   Code = c("CSV", "ALO", "PFD", "SIT", "MED", "EMP"),
   Description = c(
@@ -62,25 +46,33 @@ glossary_df <- data.frame(
 
 
 ui <- dashboardPage(
-  dashboardHeader(title = "Tagging App"),
-  
-  dashboardSidebar(sidebarMenu(id = "tabs",
-                               menuItem(
-                                 "Weekly Summary",
-                                 tabName = "weekly_summary",
-                                 icon = icon("calendar")
-                               ),
-                               menuItem("My Audit Log", tabName = "summary_tab", icon = icon("history")),
-                               menuItem("Holiday Summary", tabName = "holiday_tab", icon = icon("calendar")),
-                               
-                               menuItem("Glossary", tabName = "glossary_tab", icon = icon("book")),
-                               
-                               if (user_roles$individual %in% c("Chris", "Stella")) {
-                                 menuItem("All Tags", tabName = "special_tab", icon = icon("star"))
-                               }
-  )),
-  
+  ## Header
+  dashboardHeader(title = "Tagging App"), 
+  ## Sidebar
+  dashboardSidebar(sidebarMenu(
+    id = "tabs",
+    menuItem(
+      "Weekly Summary",
+      tabName = "weekly_summary",
+      icon = icon("calendar")
+    ),
+    menuItem("My Audit Log", tabName = "summary_tab", icon = icon("history")),
+    menuItem(
+      "Holiday Summary",
+      tabName = "holiday_tab",
+      icon = icon("calendar")
+    ),
+    
+    menuItem("Glossary", tabName = "glossary_tab", icon = icon("book")),
+    
+    if (user_roles$individual %in% c("Chris", "Stella")) {
+      menuItem("All Tags", tabName = "special_tab", icon = icon("star"))
+    }
+  )), 
+  ## Body
   dashboardBody(
+    
+    ## JS listener for arrow keys
     tags$script(
       HTML(
         "
@@ -97,6 +89,7 @@ ui <- dashboardPage(
       )
     ),
     
+    ## Make background cover the full screen 
     tags$head(tags$style(
       HTML(
         "
@@ -117,16 +110,6 @@ ui <- dashboardPage(
         min-height: 100vh;
         background-color: #edf3f9 !important;
       }
-
-    "
-      )
-    )),
-    
-    useShinyjs(),
-    
-    tags$head(tags$style(
-      HTML(
-        "
       #loading-overlay {
         position: fixed;
         width: 100%;
@@ -144,10 +127,13 @@ ui <- dashboardPage(
       )
     )),
     
+    useShinyjs(),
     div(id = "loading-overlay", "Loading Tagging App"),
     
-    # --- Define the tab items safely ---
+    ## Define tabs
     do.call(tabItems, {
+      
+      ## Weekly summary of the individual user's tab
       tab_list <- list(tabItem(tabName = "weekly_summary", fluidRow(
         column(
           2,
@@ -222,48 +208,34 @@ ui <- dashboardPage(
           actionButton("displayNextWeek", "Next Week \u2192")
         )
       )))
-      tab_list <- c(tab_list, list(
-        tabItem(
-          tabName = "summary_tab",
-          fluidRow(
-            box(
-              title = "Your Tagging History",
-              width = 12,
-              status = "primary",
-              DTOutput("auditTable")
-            )
-          )
+      ## Audit history of the individual user's tagging
+      tab_list <- c(tab_list, list(tabItem(tabName = "summary_tab", fluidRow(
+        box(
+          title = "Your Tagging History",
+          width = 12,
+          status = "primary",
+          DTOutput("auditTable")
         )
-      ))
-      tab_list <- c(tab_list, list(
-        tabItem(
-          tabName = "glossary_tab",
-          fluidRow(
-            box(
-              title = "Glossary of Tags",
-              width = 12,
-              status = "primary",
-              DTOutput("glossaryTable")
-            )
-          )
+      ))))
+      ## Renders the glossary tab
+      tab_list <- c(tab_list, list(tabItem(tabName = "glossary_tab", fluidRow(
+        box(
+          title = "Glossary of Tags",
+          width = 12,
+          status = "primary",
+          DTOutput("glossaryTable")
         )
-      ))
-      
-      tab_list <- c(tab_list, list(
-        tabItem(
-          tabName = "holiday_tab",
-          column(2,
-                 h2(paste0("Welcome, ",user_roles$team,"!")), 
-                 uiOutput("calendarDrowningSummary"),   
-                 
-                 uiOutput("calendarYearSelector"),
-                 
-                     uiOutput("calendarHoliday"),
-                     
-                 
-                 
+      ))))
+      ## Uses team user and shows results per holiday
+      tab_list <- c(tab_list, list(tabItem(
+        tabName = "holiday_tab",
+        column(
+          2,
+          h2(paste0("Welcome, ", user_roles$team, "!")),
+          uiOutput("calendarDrowningSummary"),
+          uiOutput("calendarYearSelector"),
+          uiOutput("calendarHoliday"),
           tags$div(
-            
             style = "background-color: #93c1db; padding: 15px; border-radius: 5px; margin-top: 10px;",
             tags$div(
               style = "display: inline-flex; align-items: center;",
@@ -298,23 +270,17 @@ ui <- dashboardPage(
             actionButton("weekAddLabel", "Add")
             
           )
-        ),column(
-          10,
-          uiOutput("calendarSummaryTable"),
-          fluidRow(
-            column(
-              12,
-              div(
-                style = "display: flex; justify-content: left; align-items: center; gap: 15px; flex-wrap: wrap;",
-                actionButton("calendarPrevYear", "\u2190 Previous Year"),
-                
-                actionButton("calendarNextYear", "Next Year \u2192")
-              )
-            )
+        ),
+        column(10, uiOutput("calendarSummaryTable"), fluidRow(column(
+          12,
+          div(
+            style = "display: flex; justify-content: left; align-items: center; gap: 15px; flex-wrap: wrap;",
+            actionButton("calendarPrevYear", "\u2190 Previous Year"),
+            
+            actionButton("calendarNextYear", "Next Year \u2192")
           )
-        )
-        ))
-      )
+        )))
+      )))
       if (user_roles$individual %in% c("Chris", "Stella")) {
         tab_list <- c(tab_list, list(tabItem(tabName = "special_tab", fluidRow(
           column(
@@ -323,7 +289,11 @@ ui <- dashboardPage(
             div(
               style = "display: flex; align-items: center; gap: 10px;",
               
-              actionButton("skipToEarliestAllTags", "\u219e Earliest Drowning", style = "margin-bottom: 15px"),
+              actionButton(
+                "skipToEarliestAllTags",
+                "\u219e Earliest Drowning",
+                style = "margin-bottom: 15px"
+              ),
               actionButton(
                 "displayPreviousWeekAllTags",
                 "\u2190 Previous Week",
@@ -407,6 +377,8 @@ server <- function(input, output, session) {
           tags$tr(tags$td(tags$strong("Date:")), tags$td(format(as.Date(row$Date), "%e %b %Y")),
                   tags$td(tags$strong("Time:")),
                   tags$td(ifelse(is.na(row$TimeOfIncident), "Unknown", paste0(row$TimeOfIncident, ":00")))),
+          tags$tr(tags$td(tags$strong("Alcohol/ Drugs:")), tags$td(row$AlcoholDrugDesc),
+                  tags$td(tags$strong("Buoyancy:")), tags$td(row$BuoyancyDesc)),
           tags$tr(tags$td(tags$strong("Synopsis:")), tags$td(row$Synopsis, colspan = 3))
         ),
         tags$div(
@@ -519,28 +491,7 @@ server <- function(input, output, session) {
       NULL
     })
   }
-  
-  # Safe Query Execution with Error Handling
-  dbQuerySafe <- function(query) {
-    tryCatch({
-      con <- GetWSNZAzureConnection()
-      if (is.null(con))
-        return(data.frame())
-      dbGetQuery(con, query)
-    }, error = function(e) {
-      dbError(conditionMessage(e))  # Store the error message
-      data.frame()  # Return an empty data frame to prevent app crashes
-    })
-  }
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   
   con <- GetWSNZAzureConnection()
   
@@ -919,6 +870,7 @@ server <- function(input, output, session) {
                  showNotification(sprintf("No %s years with incidents.", direction), type = "message")
                } else {
                  calendar_year(new_year)
+                 
                }
              }
            },
@@ -1456,15 +1408,25 @@ server <- function(input, output, session) {
   })
   
   # observe({
-  #   if (!identical(input$calendarYearDropdown, calendar_year())) {
-  #     updateSelectInput(session, "calendarYearDropdown", selected = calendar_year())
-  #   }
+  #   req(input$tabs == "holiday_tab")
+  #   isolate({
+  #     print(paste("Here with ",input$calendarYearDropdown, calendar_year() ))
+  #     if (!identical(input$calendarYearSelector, calendar_year())) {
+  #       print("HERE")
+  #       updateSelectInput(session, "calendarYearDropdown", selected = calendar_year())
+  #     }
+  #   })
   # })
+  # 
   
   observeEvent(input$calendarYearDropdown, {
     new_val <- as.numeric(input$calendarYearDropdown)
+    # print(paste("New value: ",new_val))
+    # print(paste("Calendar value: ",calendar_year()))
     if (!identical(calendar_year(), new_val)) {
       calendar_year(new_val)
+      updateSelectInput(session, "calendarYearDropdown", selected = new_val)
+      
     }
   })
   
